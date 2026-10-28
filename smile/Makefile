@@ -5,7 +5,7 @@ CFLAGS += -Wall -Wextra  -Wredundant-decls \
 NISTFLAGS += -Wno-unused-result -O3 -fomit-frame-pointer
 RM = /bin/rm
 
-SOURCES = polyvec.c poly.c ntt.c reduce.c util.c
+SOURCES = polyvec.c poly.c ntt.c util.c
 SOURCESKECCAK = $(SOURCES) fips202.c symmetric-shake.c
 HEADERS = params.h polyvec.h poly.h ntt.h reduce.h util.h rej.h
 HEADERSKECCAK = $(HEADERS) fips202.h
