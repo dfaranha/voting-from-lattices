@@ -29,8 +29,6 @@ public:
 void CreateProofStatement(ShortStatement &, const ComKey &,
   const Vec<Commitment> &);
 
-void SampleChallengeMatrix(Mat<ZZ_pE> &);
-
 void ProveShortness(ShortProof &, const ShortStatement &);
 
 void VerifyShortness(bool &, const ShortProof &, const ShortStatement &);

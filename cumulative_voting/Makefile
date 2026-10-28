@@ -12,8 +12,9 @@ CONFIG   =
 LIBS     = -lgmpxx -lgmp
 
 VERDEC   = ../verifiable-decryption-BGV
+# Its fips202.c is the same file as lib/fips202.c, which is linked already.
 VERDEC_SRC = encryption.cpp commitment.cpp helper.cpp linearityproof.cpp \
-             shortnessproof.cpp
+             shortnessproof.cpp fiatshamir.cpp
 VERDEC_OBJ = $(addprefix $(OBJ)/verdec_,$(VERDEC_SRC:.cpp=.o))
 
 OBJ      = obj
