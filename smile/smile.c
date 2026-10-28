@@ -15,7 +15,47 @@
  * Arguments:
  *
  */
-void smile_prove(smile_proof *p, const uint8_t rho[2 * PQMX_SYMBYTES], const poly bgvpk[2], poly candidates[PQMX_L], bgvrnd *rnd, const bgvcp *cipher, int iota)
+/* The statement the challenges are bound to, absorbed first by the prover's
+ * and the verifier's first hash: the caller's context (election and voter),
+ * the BGV public key, the candidate list and the ciphertext. Without it a
+ * proof carries over to another voter or election, and the challenges do not
+ * depend on the statement they are about. */
+#define STATEMENT_BYTES 32
+void smile_candidates_digest(uint8_t out[SMILE_DIGEST_BYTES], const poly candidates[PQMX_L])
+{
+    static const char label[] = "smile candidate list v1";
+    keccak_state st;
+    shake128_init(&st);
+    shake128_absorb(&st, (const uint8_t *)label, sizeof(label));
+    shake128_absorb(&st, (const uint8_t *)candidates, PQMX_L * sizeof(poly));
+    shake128_finalize(&st);
+    shake128_squeeze(out, SMILE_DIGEST_BYTES, &st);
+}
+
+static void statement_digest(uint8_t out[STATEMENT_BYTES], const uint8_t *ctx, size_t ctxlen,
+                             const poly bgvpk[2], const uint8_t cand_digest[SMILE_DIGEST_BYTES],
+                             const bgvcp *cipher)
+{
+    static const char label[] = "smile ballot proof v1";
+    uint8_t len[8];
+    keccak_state st;
+    for (int i = 0; i < 8; i++)
+        len[i] = (uint8_t)((uint64_t)ctxlen >> (8 * i));
+    shake128_init(&st);
+    shake128_absorb(&st, (const uint8_t *)label, sizeof(label));
+    shake128_absorb(&st, len, sizeof(len));
+    shake128_absorb(&st, ctx, ctxlen);
+    shake128_absorb(&st, (const uint8_t *)bgvpk, 2 * sizeof(poly));
+    shake128_absorb(&st, cand_digest, SMILE_DIGEST_BYTES);
+    shake128_absorb(&st, (const uint8_t *)&cipher->u, sizeof(poly));
+    shake128_absorb(&st, (const uint8_t *)&cipher->v, sizeof(poly));
+    shake128_finalize(&st);
+    shake128_squeeze(out, STATEMENT_BYTES, &st);
+}
+
+void smile_prove(smile_proof *p, const uint8_t rho[2 * PQMX_SYMBYTES], const poly bgvpk[2], poly candidates[PQMX_L],
+                 const uint8_t cand_digest[SMILE_DIGEST_BYTES], bgvrnd *rnd, const bgvcp *cipher, int iota,
+                 const uint8_t *ctx, size_t ctxlen)
 {
     unsigned int i, j, nonce = 0;
     int ctr = 0;
@@ -63,7 +103,10 @@ void smile_prove(smile_proof *p, const uint8_t rho[2 * PQMX_SYMBYTES], const pol
     poly_add(&t.tm[PQMX_M - 2], &t.tm[PQMX_M - 2], &g);
     poly_reduce(&t.tm[PQMX_M - 2]);
 
+    uint8_t sdigest[STATEMENT_BYTES];
+    statement_digest(sdigest, ctx, ctxlen, bgvpk, cand_digest, cipher);
     shake128_init(&state);
+    shake128_absorb(&state, sdigest, STATEMENT_BYTES);
     shake128_absorb(&state, rho, PQMX_SYMBYTES);
     shake128_absorb(&state, (uint8_t *)t.t0, PQMX_MU * sizeof(poly));
     shake128_absorb(&state, (uint8_t *)t.tm, sizeof(poly));
@@ -480,7 +523,9 @@ void smile_prove(smile_proof *p, const uint8_t rho[2 * PQMX_SYMBYTES], const pol
  * Arguments:
  *
  */
-int smile_proof_verify(smile_proof *p, const uint8_t rho[2 * PQMX_SYMBYTES], const poly bgvpk[2], poly candidates[PQMX_L], const bgvcp *cipher)
+int smile_proof_verify(smile_proof *p, const uint8_t rho[2 * PQMX_SYMBYTES], const poly bgvpk[2], poly candidates[PQMX_L],
+                       const uint8_t cand_digest[SMILE_DIGEST_BYTES], const bgvcp *cipher,
+                       const uint8_t *ctx, size_t ctxlen)
 {
     unsigned int i, j, ret = 0;
     uint8_t symbuf[4 * PQMX_SYMBYTES];
@@ -536,7 +581,10 @@ int smile_proof_verify(smile_proof *p, const uint8_t rho[2 * PQMX_SYMBYTES], con
     commkey ck;
     expand_commkey(&ck, rho);
 
+    uint8_t sdigest[STATEMENT_BYTES];
+    statement_digest(sdigest, ctx, ctxlen, bgvpk, cand_digest, cipher);
     shake128_init(&state);
+    shake128_absorb(&state, sdigest, STATEMENT_BYTES);
     shake128_absorb(&state, rho, PQMX_SYMBYTES);
     shake128_absorb(&state, (uint8_t *)p->t.t0, PQMX_MU * sizeof(poly));
     shake128_absorb(&state, (uint8_t *)p->t.tm, sizeof(poly));
