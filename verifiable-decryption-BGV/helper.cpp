@@ -68,7 +68,6 @@ void RejectionSamplingShortness(bool &success,
         zvec = PolyToVec(Z[i][j]); scvec = PolyToVec(SC[i][j]);
         for (int j = 0; j < N; j++){ip += zvec[j]*scvec[j];}}}
   double u = ((double)rand()/(double)RAND_MAX);
-  cout << MAInv << "\n";
   success = u < MAInv * exp((-2*ip+maxnorm)/TwoSigmaA2);}
 
 void RejectionSamplingLinearity(bool &success,
