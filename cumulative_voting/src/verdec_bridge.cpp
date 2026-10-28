@@ -123,4 +123,46 @@ void release(proof *pi) {
 	delete pi;
 }
 
+bool verify_forged(part which, const proof *pi, const uint64_t u[],
+		const uint64_t v[], const uint64_t m[], bool *equations_hold) {
+	Statement stmt = statement(u, v, m);
+	proof forged = *pi;
+	if (which == SHORTNESS) {
+		/* A Z = T C + W with C = 0 and W = A Z: true for any T. */
+		Mat<ZZ_pE> A;
+		A.SetDims(2, 4);
+		A[0][0] = comKey.B1[0]; A[0][1] = comKey.B1[1];
+		A[0][2] = comKey.B1[2]; A[0][3] = ZZ_pE(0);
+		A[1][0] = comKey.B2[0]; A[1][1] = comKey.B2[1];
+		A[1][2] = comKey.B2[2]; A[1][3] = ZZ_pE(1);
+		for (long i = 0; i < forged.shortProof.C.NumRows(); i++)
+			for (long j = 0; j < forged.shortProof.C.NumCols(); j++)
+				forged.shortProof.C[i][j] = ZZ_pE(0);
+		MatrixMult(forged.shortProof.W, A, forged.shortProof.Z);
+		Mat<ZZ_pE> AZ, T, TC, TCW;
+		T.SetDims(2, tau);
+		for (long i = 0; i < tau; i++) {
+			T[0][i] = forged.noiseCom[i].com[0];
+			T[1][i] = forged.noiseCom[i].com[1];
+		}
+		AZ.SetDims(2, lambda + 2); TC.SetDims(2, lambda + 2); TCW.SetDims(2, lambda + 2);
+		MatrixMult(AZ, A, forged.shortProof.Z);
+		MatrixMult(TC, T, forged.shortProof.C);
+		MatrixAdd(TCW, TC, forged.shortProof.W);
+		*equations_hold = (AZ == TCW);
+	} else {
+		/* With c = 0 the three equations are t1 = B1 z1, t2 = B1 z2 and
+		 * u = alpha (z1[1] + B2[2] z1[2]) - (z2[1] + B2[2] z2[2]). */
+		LinProof &lp = forged.linProof[0];
+		const ZZ_pE alpha = -stmt.ciphertexts[0].CTXu / ZZ_p(p);
+		lp.c = ZZ_pE(0);
+		lp.t1 = lp.z1[0] + lp.z1[1] * comKey.B1[1] + lp.z1[2] * comKey.B1[2];
+		lp.t2 = lp.z2[0] + lp.z2[1] * comKey.B1[1] + lp.z2[2] * comKey.B1[2];
+		lp.u = alpha * (lp.z1[1] + lp.z1[2] * comKey.B2[2]) -
+			(lp.z2[1] + lp.z2[2] * comKey.B2[2]);
+		*equations_hold = true;	/* by construction, given c = 0 */
+	}
+	return verify(&forged, u, v, m);
+}
+
 }

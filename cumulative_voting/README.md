@@ -25,8 +25,10 @@ sum and proves the decryption correct with the proof of
 `../verifiable-decryption-BGV`, which the program then checks. It also checks
 that a ballot over the vote budget, a ballot with more than `LC` votes to one
 candidate and a ballot changed after its proof are rejected, and that the
-decryption proof does not verify for another tally or another ciphertext. It
-exits non-zero if any check fails.
+decryption proof does not verify for another tally or another ciphertext, and
+that a decryption proof whose challenges the prover chose itself is rejected
+even though its verification equations hold. It exits non-zero if any check
+fails.
 ```sh
 make CONFIG="-DNV=4 -DNC=8 -DLC=4 -DLS=8" election
 ./election
@@ -36,12 +38,9 @@ translation unit, so `src/verdec_bridge.cpp` passes coefficient arrays between
 them (see `include/verdec_bridge.h`); the two use the same q, the same
 plaintext modulus p = 10000009 and the same form of BGV.
 
-What the decryption proof does not give, as `../verifiable-decryption-BGV`
-implements it:
-- its challenges are drawn by the prover, not derived from the transcript, so
-  it is the interactive protocol run in one process: it shows that honest
-  proofs verify and do not carry over to another tally, not soundness against
-  a prover who picks its own challenges;
-- its `Commitment` objects carry their openings next to `com`. The verifier
-  here reads only `com`, and rebuilds the statement of the proof of shortness
-  from the commitment key and those `com`, rather than taking the prover's.
+The decryption proof's challenges are derived by Fiat-Shamir
+(`../verifiable-decryption-BGV/fiatshamir.cpp`) and recomputed by the
+verifier. Its `Commitment` objects still carry their openings next to `com`;
+the verifier here reads only `com`, and rebuilds the statement of the proof of
+shortness from the commitment key and those `com` rather than taking the
+prover's.

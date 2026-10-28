@@ -222,6 +222,17 @@ int main() {
 		check("the decryption proof does not verify for another ciphertext",
 				!verdec::verify(dp, u2.data(), w2.data(), m.data()));
 	}
+	{
+		bool eq;
+		bool accepted = verdec::verify_forged(verdec::SHORTNESS, dp, u.data(),
+				w.data(), m.data(), &eq);
+		check("a shortness proof with a challenge of its own is rejected",
+				eq && !accepted);
+		accepted = verdec::verify_forged(verdec::LINEAR, dp, u.data(), w.data(),
+				m.data(), &eq);
+		check("a linear proof with a challenge of its own is rejected",
+				eq && !accepted);
+	}
 	verdec::release(dp);
 
 	cout << "\n    tally:";
