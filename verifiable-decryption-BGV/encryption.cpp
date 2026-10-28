@@ -15,7 +15,7 @@ void KeyGenEnc(EncKey &encKey){
 
 void Encrypt(Ciphertext &ctx, const EncKey &encKey, const ZZ_pE &m){
   ZZ_pE r,e1,e2;
-  SampleBounded(r,B), SampleBounded(e1,B), SampleBounded(e1,B);
+  SampleBounded(r,B), SampleBounded(e1,B), SampleBounded(e2,B);
   ctx.CTXu = encKey.PKa*r+ZZ_pE(p)*e1, ctx.CTXv = encKey.PKb*r+ZZ_pE(p)*e2+m;}
 
 void RoundModP(ZZ_pE &m){
