@@ -19,6 +19,24 @@ namespace parameters{
 using poly_t = zq::poly<4096>;
 
 #define plaintextModulus 10000009  // set p next_prime after NV*LC
+
+/* The elections benchmarked against each other share the knobs MSGS (voters),
+ * NCAND (candidates), MIXERS (mix servers) and PARTIES (trustees), as
+ * make CONFIG="-D...". MSGS and NCAND are NV and NC here, which still work.
+ * The tally is homomorphic, with no mix servers and one decryptor, so MIXERS
+ * can only be 0 and PARTIES only 1. */
+#if defined(MSGS) && !defined(NV)
+#define NV MSGS
+#endif
+#if defined(NCAND) && !defined(NC)
+#define NC NCAND
+#endif
+#if defined(MIXERS) && MIXERS != 0
+#error "cumulative_voting: the tally is homomorphic, with no mix servers, so MIXERS can only be 0"
+#endif
+#if defined(PARTIES) && PARTIES != 1
+#error "cumulative_voting: one decryptor decrypts the tally, so PARTIES can only be 1"
+#endif
 #ifndef NV
 #define NV 100                    // number of voters
 #endif
