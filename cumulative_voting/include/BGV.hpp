@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 
 #include <algorithm>

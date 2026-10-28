@@ -1,3 +1,4 @@
+#include <array>
 #include <iostream>
 #include <string>
 #include <memory>
@@ -38,7 +39,6 @@ void random_ballot(P& out, array<V, NC> ballot){
 }
 
 int main(){
-	constexpr size_t vecsize = P::simd_mode::template elt_count<P::value_type>::value;
 	cout << "Number of voters:        " << NV << endl;
 	cout << "Number of candiates:     " << NC << endl;
 	cout << "Max vote per candidate:  " << LC << endl;
