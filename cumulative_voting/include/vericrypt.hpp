@@ -44,8 +44,13 @@ typedef BDLOP::comm_pk_t<kappa> comm_key_t;
 
 #define nmod(a, m) ((a) < 0 ? (m - (-1*(a))%m) : (a)%m)
 
-void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P &message);
+/* ctx names the election and the voter, as bytes the caller chooses; the
+ * proof holds only for that ctx, the public key, the commitment key and the
+ * ciphertext it carries (see statement_digest in vericrypt.cpp). */
+void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P &message,
+		const uint8_t *ctx, size_t ctxlen);
 
-bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey);
+bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey,
+		const uint8_t *ctx, size_t ctxlen);
 
 #endif /* INCLUDE_VERICRYPT_HPP_ */

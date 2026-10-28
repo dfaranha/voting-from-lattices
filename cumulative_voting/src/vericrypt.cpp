@@ -29,7 +29,36 @@ T* alloc_aligned(size_t n, Args&& ... args)
 
 using V = typename P::value_type;
 
-void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P &message){
+/* The statement the Fiat-Shamir challenges are bound to: the caller's context
+ * (election and voter), the BGV public key, the commitment key and the
+ * ciphertext. The first hash of the prover and of the verifier absorbs it
+ * before anything else, so every later challenge depends on it: a proof does
+ * not carry over to another voter, election, key or ciphertext, and the
+ * statement cannot be chosen after the challenges. */
+static void statement_digest(uint8_t out[SYMBYTES], const uint8_t *ctx, size_t ctxlen,
+		const pk_t &pubkey, const comm_key_t &commkey, const ctx_t &ct){
+	static const char label[] = "cumulative_voting vericrypt v1";
+	uint8_t len[8];
+	for(int i=0;i<8;i++) len[i] = (uint8_t)((uint64_t)ctxlen >> (8*i));
+	shake128incctx st;
+	shake128_inc_init(&st);
+	shake128_inc_absorb(&st, (const uint8_t *)label, sizeof(label));
+	shake128_inc_absorb(&st, len, sizeof(len));
+	shake128_inc_absorb(&st, ctx, ctxlen);
+	shake128_inc_absorb(&st, (const uint8_t *)pubkey.a.data(), sizeof(P));
+	shake128_inc_absorb(&st, (const uint8_t *)pubkey.b.data(), sizeof(P));
+	for(auto &row : commkey.B0l) for(auto &e : row) shake128_inc_absorb(&st, (const uint8_t *)e.data(), sizeof(P));
+	for(auto &row : commkey.B0k) for(auto &e : row) shake128_inc_absorb(&st, (const uint8_t *)e.data(), sizeof(P));
+	for(auto &row : commkey.b) for(auto &e : row) shake128_inc_absorb(&st, (const uint8_t *)e.data(), sizeof(P));
+	shake128_inc_absorb(&st, (const uint8_t *)ct.c0.data(), sizeof(P));
+	shake128_inc_absorb(&st, (const uint8_t *)ct.c1.data(), sizeof(P));
+	shake128_inc_finalize(&st);
+	shake128_inc_squeeze(out, SYMBYTES, &st);
+	shake128_inc_ctx_release(&st);
+}
+
+void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P &message,
+		const uint8_t *ctx, size_t ctxlen){
 
 	uint8_t symbuf[4*SYMBYTES];
 	memset(symbuf, 0, 4*SYMBYTES);
@@ -90,7 +119,10 @@ void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P
 
 	BDLOP::commit_poly(p.t, g, shat.size(), true);
 
+	uint8_t sdigest[SYMBYTES];
+	statement_digest(sdigest, ctx, ctxlen, pubkey, commkey, p.ct);
 	shake128_inc_init(&state);
+	shake128_inc_absorb(&state, sdigest, SYMBYTES);
 	shake128_inc_absorb(&state, (uint8_t *)p.t.t0.begin(), parameters::MU*sizeof(P));
 	shake128_inc_absorb(&state, (uint8_t *)p.t.t.begin(),  (shat.size() + 1)*sizeof(P));
 	shake128_inc_finalize(&state);
@@ -415,7 +447,8 @@ void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P
 
 }
 
-bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey){
+bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey,
+		const uint8_t *ctx, size_t ctxlen){
 
 
 	bool  flag = true;
@@ -454,7 +487,10 @@ bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey){
 
 	shake128incctx state;
 
+	uint8_t sdigest[SYMBYTES];
+	statement_digest(sdigest, ctx, ctxlen, pubkey, commkey, p.ct);
 	shake128_inc_init(&state);
+	shake128_inc_absorb(&state, sdigest, SYMBYTES);
 	shake128_inc_absorb(&state, (uint8_t *)p.t.t0.data(), parameters::MU*sizeof(P));
 	shake128_inc_absorb(&state, (uint8_t *)p.t.t.data(),  (4+LC+1)*sizeof(P));
 	shake128_inc_finalize(&state);

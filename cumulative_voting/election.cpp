@@ -7,9 +7,11 @@
  * checks every proof; the accepted ciphertexts are added; the decryptor
  * decrypts the sum and proves the decryption correct with
  * ../verifiable-decryption-BGV; and anyone checks that proof and reads the
- * tally. It also checks that invalid ballots, a ballot changed after its
- * proof, and a decryption proof moved to another tally or ciphertext are all
- * rejected. Exits non-zero if any check fails.
+ * tally. Each ballot proof is bound to the election and the voter. It also
+ * checks that invalid ballots, a ballot changed after its proof, a ballot
+ * proof moved to another voter or election, a second ballot from one voter,
+ * a decryption proof moved to another tally or ciphertext, and decryption
+ * proofs whose challenges the prover chose itself are all rejected. Exits non-zero if any check fails.
  *
  * Build and run with make election && ./election; the sizes are params.hpp's
  * NV, NC, LC and LS, which make CONFIG="-DNV=... " overrides.
@@ -81,14 +83,58 @@ static P ballot(const votes_t &v) {
 	return m;
 }
 
-/* Proves a ballot and checks a copy of the proof, since verify() moves the
- * proof's responses into NTT form in place. */
-static bool cast_and_check(proof_t &out, const votes_t &v, const pk_t &pk,
-		const comm_key_t &ck) {
-	vericrypt(out, pk, ck, ballot(v));
-	auto copy = make_unique<proof_t>(out);
-	return verify(*copy, ck, pk);
+/* ---------------------------------------------------------------------------
+ * The context a ballot proof is bound to: the election's identifier and the
+ * voter's index on the roll.
+ */
+typedef array<uint8_t, 16> election_id_t;
+
+static election_id_t new_election_id() {
+	election_id_t id;
+	random_device rd;
+	for (auto &b : id) b = (uint8_t) rd();
+	return id;
 }
+
+static vector<uint8_t> context(const election_id_t &eid, uint32_t voter) {
+	static const char label[] = "cumulative voting ballot";
+	vector<uint8_t> c(label, label + sizeof(label));
+	c.insert(c.end(), eid.begin(), eid.end());
+	for (int i = 0; i < 4; i++) c.push_back((uint8_t) (voter >> (8 * i)));
+	return c;
+}
+
+/* Checks a copy of the proof, since verify() moves the proof's responses into
+ * NTT form in place. */
+static bool check_proof(const proof_t &pf, const pk_t &pk, const comm_key_t &ck,
+		const election_id_t &eid, uint32_t voter) {
+	auto copy = make_unique<proof_t>(pf);
+	vector<uint8_t> c = context(eid, voter);
+	return verify(*copy, ck, pk, c.data(), c.size());
+}
+
+static void prove(proof_t &out, const votes_t &v, const pk_t &pk,
+		const comm_key_t &ck, const election_id_t &eid, uint32_t voter) {
+	vector<uint8_t> c = context(eid, voter);
+	vericrypt(out, pk, ck, ballot(v), c.data(), c.size());
+}
+
+/* The bulletin board: one ballot per voter on the roll, each checked against
+ * that voter's context, added to the tally if accepted. */
+struct board_t {
+	election_id_t eid;
+	vector<bool> voted = vector<bool>(NV, false);
+	BGV::ciphertext_t tally;
+
+	bool cast(uint32_t voter, const proof_t &pf, const pk_t &pk,
+			const comm_key_t &ck) {
+		if (voter >= NV || voted[voter]) return false;
+		if (!check_proof(pf, pk, ck, eid, voter)) return false;
+		voted[voter] = true;
+		tally += pf.ct;
+		return true;
+	}
+};
 
 /* ---------------------------------------------------------------------------
  * Coefficient arrays for the decryption proof, in [0, q).
@@ -123,27 +169,43 @@ int main() {
 	/* Voting and the board's check. */
 	double t_cast = 0, t_check = 0;
 	vector<uint64_t> expected(NC, 0);
-	BGV::ciphertext_t tally;
+	board_t board;
+	board.eid = new_election_id();
 	bool all_accepted = true;
 	auto pf = make_unique<proof_t>();
-	for (int i = 0; i < NV; i++) {
+	for (uint32_t i = 0; i < NV; i++) {
 		votes_t v = valid_votes();
 		t0 = chrono::steady_clock::now();
-		vericrypt(*pf, pk, *ck, ballot(v));
+		prove(*pf, v, pk, *ck, board.eid, i);
 		t_cast += seconds_since(t0);
 
 		t0 = chrono::steady_clock::now();
-		auto copy = make_unique<proof_t>(*pf);
-		bool ok = verify(*copy, *ck, pk);
+		bool ok = board.cast(i, *pf, pk, *ck);
 		t_check += seconds_since(t0);
 
 		all_accepted &= ok;
 		if (ok) {
-			tally += pf->ct;
 			for (size_t j = 0; j < NC; j++) expected[j] += v[j];
 		}
 	}
 	check("the board accepts every voter's ballot proof", all_accepted);
+	BGV::ciphertext_t &tally = board.tally;
+
+	/* The last voter's proof, elsewhere. */
+	{
+		check("a ballot proof moved to another voter is rejected",
+				!check_proof(*pf, pk, *ck, board.eid, NV > 1 ? 0 : 1));
+		election_id_t other = board.eid;
+		other[0] ^= 1;
+		check("a ballot proof moved to another election is rejected",
+				!check_proof(*pf, pk, *ck, other, NV - 1));
+		/* A second, valid ballot from a voter who has voted. */
+		auto again = make_unique<proof_t>();
+		prove(*again, valid_votes(), pk, *ck, board.eid, 0);
+		check("the board rejects a second ballot from the same voter",
+				check_proof(*again, pk, *ck, board.eid, 0) &&
+				!board.cast(0, *again, pk, *ck));
+	}
 
 	/* Invalid ballots: the prover runs, but the board must refuse the proof. */
 	{
@@ -152,8 +214,9 @@ int main() {
 		size_t j = 0;
 		while (v[j] >= LC) j++;
 		v[j]++;
+		prove(*pf, v, pk, *ck, board.eid, NV);
 		check("a ballot over the vote budget is rejected",
-				!cast_and_check(*pf, v, pk, *ck));
+				!check_proof(*pf, pk, *ck, board.eid, NV));
 	}
 	{
 		/* LC + 1 votes to one candidate, the budget kept where it can be. */
@@ -165,20 +228,21 @@ int main() {
 			v[j] = give;
 			left -= give;
 		}
+		prove(*pf, v, pk, *ck, board.eid, NV);
 		check("a ballot with more than LC votes to one candidate is rejected",
-				!cast_and_check(*pf, v, pk, *ck));
+				!check_proof(*pf, pk, *ck, board.eid, NV));
 	}
 	{
 		/* A valid proof, then its ciphertext changed: one vote moved. */
 		votes_t v = valid_votes();
-		bool honest = cast_and_check(*pf, v, pk, *ck);
+		prove(*pf, v, pk, *ck, board.eid, NV);
+		bool honest = check_proof(*pf, pk, *ck, board.eid, NV);
 		P delta{0};
 		delta.data()[0] = 1;
 		delta.ntt_pow_phi();
 		pf->ct.c1 = pf->ct.c1 + delta;
-		auto copy = make_unique<proof_t>(*pf);
 		check("a ballot changed after its proof is rejected",
-				honest && !verify(*copy, *ck, pk));
+				honest && !check_proof(*pf, pk, *ck, board.eid, NV));
 	}
 
 	/* Decryption. */

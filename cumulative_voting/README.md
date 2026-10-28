@@ -4,6 +4,13 @@ The ring arithmetic, in R_q = Z_q[X]/(X^4096 + 1) with q = 4611686018326724609,
 is `include/zq.hpp`; the code no longer uses NFLlib. GMP is the only library it
 needs.
 
+## Ballot proofs are bound to the election and the voter
+`vericrypt` and `verify` take a context, bytes the caller chooses (`election`
+uses an election identifier and the voter's index). The first Fiat-Shamir hash
+absorbs a digest of that context, the BGV public key, the commitment key and
+the ciphertext, so a proof holds only for that voter, election, key and
+ciphertext.
+
 ## Compile & Run
 To test the verifiable encryption of cumulative ballots:
 ```sh
@@ -25,7 +32,9 @@ sum and proves the decryption correct with the proof of
 `../verifiable-decryption-BGV`, which the program then checks. It also checks
 that a ballot over the vote budget, a ballot with more than `LC` votes to one
 candidate and a ballot changed after its proof are rejected, and that the
-decryption proof does not verify for another tally or another ciphertext, and
+decryption proof does not verify for another tally or another ciphertext, that
+a ballot proof does not verify for another voter or another election and the
+board takes one ballot per voter, and
 that a decryption proof whose challenges the prover chose itself is rejected
 even though its verification equations hold. It exits non-zero if any check
 fails.
