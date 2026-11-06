@@ -31,7 +31,8 @@ each proof, the accepted ciphertexts are added, and the decryptor decrypts the
 sum and proves the decryption correct with the proof of
 `../verifiable-decryption-BGV`, which the program then checks. It also checks
 that a ballot over the vote budget, a ballot with more than `LC` votes to one
-candidate and a ballot changed after its proof are rejected, and that the
+candidate, a ballot with a vote past the last candidate and a ballot changed
+after its proof are rejected, and that the
 decryption proof does not verify for another tally or another ciphertext, that
 a ballot proof does not verify for another voter or another election and the
 board takes one ballot per voter, and
@@ -42,6 +43,13 @@ fails.
 make CONFIG="-DNV=4 -DNC=8 -DLC=4 -DLS=8" election
 ./election
 ```
+
+The ballot proof shows every coefficient of the vote in [0, `LC`] and a
+weighted sum of them equal to `LS`: weight 1 on the `NC` candidates'
+coefficients and `LS + 1` on the rest. The sum is far below q, so it holds over
+the integers, and a vote in a coefficient no candidate reads would alone exceed
+the budget; the paper's sum of all coefficients left those free.
+
 It needs NTL, for the decryption proof. That code and this one cannot share a
 translation unit, so `src/verdec_bridge.cpp` passes coefficient arrays between
 them (see `include/verdec_bridge.h`); the two use the same q, the same

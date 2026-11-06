@@ -57,6 +57,22 @@ static void statement_digest(uint8_t out[SYMBYTES], const uint8_t *ctx, size_t c
 	shake128_inc_ctx_release(&st);
 }
 
+/* The ballot's sum, sum_i w_i m_i = LS, with w_i = 1 for the NC candidates'
+ * coefficients and LS + 1 for the rest. The range proof makes every m_i an
+ * integer in [0, LC], and sum_i w_i m_i <= (NC + (LS + 1)(N - NC)) LC is far
+ * below q, so the equation holds over the integers: the votes add up to LS,
+ * and a vote in any coefficient past the candidates would alone exceed it.
+ * The proof's linear part takes the sum as gamma3 times the weights added to
+ * pi_3, the coefficient vector of m. */
+static void add_sum_weights(P &pi, V gamma3){
+	const V q = P::get_modulus(0);
+	const V heavy = (V)((unsigned __int128)gamma3 * (LS + 1) % q);
+	for(size_t i=0; i < P::degree; i++){
+		V w = (i < (size_t) NC) ? gamma3 : heavy;
+		pi.data()[i] = (V)(((unsigned __int128)pi.data()[i] + w) % q);
+	}
+}
+
 void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P &message,
 		const uint8_t *ctx, size_t ctxlen){
 
@@ -334,9 +350,7 @@ void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P
 			gammas[3*_mu].invntt_pow_invphi();
 			gammas[3*_mu+1].invntt_pow_invphi();
 			gammas[3*_mu+2].invntt_pow_invphi();
-			for(int i=0; i < P::degree; i++){
-				pis[3].data()[i] += gammas[3*_mu + 2].data()[0];
-			}
+			add_sum_weights(pis[3], gammas[3*_mu + 2].data()[0]);
 			mpz_set_ui(gamma3_mpz, gammas[3*_mu + 2].data()[0]);
 
 			utils::poly_inner_product_Zq(ug, p.ct.c0, gammas[3*_mu]);
@@ -688,9 +702,7 @@ bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey,
 		gammas[3*_mu].invntt_pow_invphi();
 		gammas[3*_mu+1].invntt_pow_invphi();
 		gammas[3*_mu+2].invntt_pow_invphi();
-		for(int i=0; i < P::degree; i++){
-			pis[3].data()[i] += gammas[3*_mu + 2].data()[0];
-		}
+		add_sum_weights(pis[3], gammas[3*_mu + 2].data()[0]);
 		mpz_set_ui(gamma3_mpz, gammas[3*_mu + 2].data()[0]);
 
 		utils::poly_inner_product_Zq(ug, p.ct.c0, gammas[3*_mu]);

@@ -8,10 +8,12 @@
  * decrypts the sum and proves the decryption correct with
  * ../verifiable-decryption-BGV; and anyone checks that proof and reads the
  * tally. Each ballot proof is bound to the election and the voter. It also
- * checks that invalid ballots, a ballot changed after its proof, a ballot
- * proof moved to another voter or election, a second ballot from one voter,
- * a decryption proof moved to another tally or ciphertext, and decryption
- * proofs whose challenges the prover chose itself are all rejected. Exits non-zero if any check fails.
+ * checks that invalid ballots (over the budget, over LC to a candidate, or with
+ * a vote past the last candidate), a ballot changed after its proof, a ballot
+ * proof moved to another voter or election, a second ballot from one voter, a
+ * decryption proof moved to another tally or ciphertext, and decryption proofs
+ * whose challenges the prover chose itself are all rejected. Exits non-zero if
+ * any check fails.
  *
  * Build and run with make election && ./election; the sizes are params.hpp's
  * NV, NC, LC and LS, which make CONFIG="-DNV=... " overrides.
@@ -113,10 +115,15 @@ static bool check_proof(const proof_t &pf, const pk_t &pk, const comm_key_t &ck,
 	return verify(*copy, ck, pk, c.data(), c.size());
 }
 
-static void prove(proof_t &out, const votes_t &v, const pk_t &pk,
+static void prove(proof_t &out, const P &m, const pk_t &pk,
 		const comm_key_t &ck, const election_id_t &eid, uint32_t voter) {
 	vector<uint8_t> c = context(eid, voter);
-	vericrypt(out, pk, ck, ballot(v), c.data(), c.size());
+	vericrypt(out, pk, ck, m, c.data(), c.size());
+}
+
+static void prove(proof_t &out, const votes_t &v, const pk_t &pk,
+		const comm_key_t &ck, const election_id_t &eid, uint32_t voter) {
+	prove(out, ballot(v), pk, ck, eid, voter);
 }
 
 /* The bulletin board: one ballot per voter on the roll, each checked against
@@ -230,6 +237,20 @@ int main() {
 		}
 		prove(*pf, v, pk, *ck, board.eid, NV);
 		check("a ballot with more than LC votes to one candidate is rejected",
+				!check_proof(*pf, pk, *ck, board.eid, NV));
+	}
+	if (NC < P::degree) {
+		/* A valid ballot with one vote moved past the last candidate, to a
+		 * coefficient no candidate reads: within the budget and LC, but the
+		 * board must refuse it. */
+		votes_t v = valid_votes();
+		size_t j = 0;
+		while (v[j] == 0) j++;
+		v[j]--;
+		P m = ballot(v);
+		m.data()[NC] = 1;
+		prove(*pf, m, pk, *ck, board.eid, NV);
+		check("a ballot with a vote past the last candidate is rejected",
 				!check_proof(*pf, pk, *ck, board.eid, NV));
 	}
 	{
