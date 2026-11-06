@@ -317,6 +317,10 @@ int main() {
 				m.data(), &eq);
 		check("a linear proof with a challenge of its own is rejected",
 				eq && !accepted);
+		accepted = verdec::verify_forged(verdec::NOISE_ROW, dp, u.data(),
+				w.data(), m.data(), &eq);
+		check("a shortness proof with a long noise row is rejected",
+				eq && !accepted);
 	}
 	verdec::release(dp);
 

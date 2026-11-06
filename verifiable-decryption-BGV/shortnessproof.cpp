@@ -25,6 +25,10 @@ static void Challenge(Mat<ZZ_pE> &C, const ShortStatement &stmt,
   t.Absorb(stmt.A); t.Absorb(stmt.T); t.Absorb(W);
   ShortnessChallenge(C, t);}
 
+void ShortnessChallengeFor(Mat<ZZ_pE> &C, const ShortStatement &stmt,
+  const Mat<ZZ_pE> &W){
+  Challenge(C, stmt, W);}
+
 void ProveShortness(ShortProof &proof, const ShortStatement &stmt){
   Mat<ZZ_pE> Y; Y.SetDims(4,lambda+2);
   Mat<ZZ_pE> SC; SC.SetDims(4,lambda+2);

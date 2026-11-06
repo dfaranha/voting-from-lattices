@@ -31,4 +31,8 @@ void CreateProofStatement(ShortStatement &, const ComKey &,
 
 void ProveShortness(ShortProof &, const ShortStatement &);
 
+/* The challenge matrix the prover and the verifier derive from (A, T) and W. */
+void ShortnessChallengeFor(Mat<ZZ_pE> &, const ShortStatement &,
+  const Mat<ZZ_pE> &);
+
 void VerifyShortness(bool &, const ShortProof &, const ShortStatement &);

@@ -41,8 +41,11 @@ void release(proof *pi);
 /* What a prover who picks its own challenges could send: the proof of
  * shortness with C = 0 and W = A Z, or the linear proof with c = 0 and t1, t2
  * and u solved for. Either satisfies its verification equations, which
- * *equations_hold reports; only the Fiat-Shamir check can reject it. */
-enum part { SHORTNESS, LINEAR };
+ * *equations_hold reports; only the Fiat-Shamir check can reject it.
+ * NOISE_ROW is a proof of shortness made honestly but with 2^37 added to one
+ * coefficient of the mask of Z's last row, the noise's: its equations and its
+ * challenge hold, and only the norm check on that row can reject it. */
+enum part { SHORTNESS, LINEAR, NOISE_ROW };
 bool verify_forged(part which, const proof *pi, const uint64_t u[],
 		const uint64_t v[], const uint64_t m[], bool *equations_hold);
 

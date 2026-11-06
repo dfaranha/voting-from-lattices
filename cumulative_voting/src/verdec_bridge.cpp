@@ -150,6 +150,27 @@ bool verify_forged(part which, const proof *pi, const uint64_t u[],
 		MatrixMult(TC, T, forged.shortProof.C);
 		MatrixAdd(TCW, TC, forged.shortProof.W);
 		*equations_hold = (AZ == TCW);
+	} else if (which == NOISE_ROW) {
+		/* ProveShortness without rejection sampling, Y[3] made long. */
+		ShortProof &sp = forged.shortProof;
+		Mat<ZZ_pE> Y, SC, AZ, TC, TCW, C;
+		Y.SetDims(4, lambda + 2); SC.SetDims(4, lambda + 2);
+		SampleGaussian(Y[0], Sigma_A); SampleGaussian(Y[1], Sigma_A);
+		SampleGaussian(Y[2], Sigma_A); SampleGaussian(Y[3], Sigma_A);
+		ZZ_pX big;
+		SetCoeff(big, 0, to_ZZ_p(power2_ZZ(37)));
+		Y[3][0] += to_ZZ_pE(big);
+		MatrixMult(sp.W, pi->shortstmt.A, Y);
+		ShortnessChallengeFor(sp.C, pi->shortstmt, sp.W);
+		MatrixMult(SC, pi->shortstmt.S, sp.C);
+		MatrixAdd(sp.Z, SC, Y);
+		AZ.SetDims(2, lambda + 2); TC.SetDims(2, lambda + 2); TCW.SetDims(2, lambda + 2);
+		C.SetDims(tau, lambda + 2);
+		MatrixMult(AZ, pi->shortstmt.A, sp.Z);
+		MatrixMult(TC, pi->shortstmt.T, sp.C);
+		MatrixAdd(TCW, TC, sp.W);
+		ShortnessChallengeFor(C, pi->shortstmt, sp.W);
+		*equations_hold = (AZ == TCW) && (C == sp.C);
 	} else {
 		/* With c = 0 the three equations are t1 = B1 z1, t2 = B1 z2 and
 		 * u = alpha (z1[1] + B2[2] z1[2]) - (z2[1] + B2[2] z2[2]). */
