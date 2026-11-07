@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace verdec {
 
@@ -37,6 +38,16 @@ bool verify(const proof *pi, const uint64_t u[], const uint64_t v[],
 		const uint64_t m[]);
 
 void release(proof *pi);
+
+/* The proof as published bytes: the commitment to the noise; the linear
+ * proof's t1, t2 and u, its challenge c as 36 (position, sign) pairs in
+ * increasing position, and z1, z2; the proof of shortness's W, its challenge
+ * C at one bit an entry, and Z. Uniform elements are written at 62 bits a
+ * coefficient, the responses as centred coefficients Golomb-Rice coded about
+ * their sigma. decode returns the proof, with only what verify reads, or
+ * nullptr for anything but exactly an encoding encode produces. */
+std::vector<uint8_t> encode(const proof *pi);
+proof *decode(const uint8_t *buf, size_t len);
 
 /* What a prover who picks its own challenges could send: the proof of
  * shortness with C = 0 and W = A Z, or the linear proof with c = 0 and t1, t2

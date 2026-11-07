@@ -157,7 +157,8 @@ int main() {
 	cout << "\n** End-to-end test of cumulative voting with homomorphic tallying:\n\n";
 	cout << "    " << NV << " voters, " << NC << " candidates, at most " << LC
 		<< " votes to one, " << LS << " votes each\n";
-	cout << "    ballot proof: " << sizeof(proof_t) / 1024.0 << " KiB in memory\n\n";
+	cout << "    ballot proof: " << proof_bytes() / 1024.0 << " KiB as published ("
+		<< sizeof(proof_t) / 1024.0 << " KiB in memory)\n\n";
 
 	if (verdec::degree() != P::degree) {
 		cerr << "the decryption proof is for another degree" << endl;
@@ -178,16 +179,21 @@ int main() {
 	vector<uint64_t> expected(NC, 0);
 	board_t board;
 	board.eid = new_election_id();
-	bool all_accepted = true;
+	bool all_accepted = true, all_encoded = true;
 	auto pf = make_unique<proof_t>();
+	auto rd = make_unique<proof_t>();
+	vector<uint8_t> published(proof_bytes());
 	for (uint32_t i = 0; i < NV; i++) {
 		votes_t v = valid_votes();
 		t0 = chrono::steady_clock::now();
 		prove(*pf, v, pk, *ck, board.eid, i);
+		all_encoded &= proof_encode(published.data(), *pf);
 		t_cast += seconds_since(t0);
 
+		/* The board reads the proof, ciphertext included, from its bytes. */
 		t0 = chrono::steady_clock::now();
-		bool ok = board.cast(i, *pf, pk, *ck);
+		bool ok = proof_decode(*rd, published.data(), published.size()) &&
+			board.cast(i, *rd, pk, *ck);
 		t_check += seconds_since(t0);
 
 		all_accepted &= ok;
@@ -195,7 +201,21 @@ int main() {
 			for (size_t j = 0; j < NC; j++) expected[j] += v[j];
 		}
 	}
+	check("every ballot proof is published as bytes", all_encoded);
 	check("the board accepts every voter's ballot proof", all_accepted);
+	{
+		/* The last ballot's bytes, a byte longer, or with a z coefficient
+		 * past the bound: both are encodings no prover writes. */
+		vector<uint8_t> longer(published);
+		longer.push_back(0);
+		check("a published ballot proof with a byte appended is refused",
+				!proof_decode(*rd, longer.data(), longer.size()));
+		vector<uint8_t> wide(published);
+		size_t at = (parameters::MU + kappa + 2) * P::degree * 62;
+		for (int b = 0; b < 33; b++) wide[(at + b) / 8] |= (uint8_t) (1u << ((at + b) % 8));
+		check("a published ballot proof with a response past its bound is refused",
+				!proof_decode(*rd, wide.data(), wide.size()));
+	}
 	BGV::ciphertext_t &tally = board.tally;
 
 	/* The last voter's proof, elsewhere. */
@@ -282,18 +302,31 @@ int main() {
 
 	t0 = chrono::steady_clock::now();
 	verdec::proof *dp = verdec::prove(u.data(), w.data(), m.data());
+	vector<uint8_t> dbytes = verdec::encode(dp);
 	double t_dprove = seconds_since(t0);
 
+	/* Anyone: the proof as read from its bytes. The prover's own copy, which
+	 * holds the openings, is kept only for the forged proofs below. */
 	t0 = chrono::steady_clock::now();
-	bool dec_ok = verdec::verify(dp, u.data(), w.data(), m.data());
+	verdec::proof *rp = verdec::decode(dbytes.data(), dbytes.size());
+	bool dec_ok = rp != nullptr && verdec::verify(rp, u.data(), w.data(), m.data());
 	double t_dverify = seconds_since(t0);
+	check("the decryption proof is published as bytes", !dbytes.empty() && rp != nullptr);
 	check("the proof of correct decryption verifies", dec_ok);
+	{
+		vector<uint8_t> longer(dbytes);
+		longer.push_back(0);
+		verdec::proof *lp = verdec::decode(longer.data(), longer.size());
+		check("a published decryption proof with a byte appended is refused", lp == nullptr);
+		if (lp != nullptr) verdec::release(lp);
+	}
+	if (rp == nullptr) rp = dp;	/* the tests below need a proof to move */
 
 	{
 		coeffs_t other = m;
 		other[0] = (other[0] + 1) % plaintextModulus;
 		check("the decryption proof does not verify for another tally",
-				!verdec::verify(dp, u.data(), w.data(), other.data()));
+				!verdec::verify(rp, u.data(), w.data(), other.data()));
 	}
 	{
 		/* The same plaintext under another ciphertext: the tally plus a fresh
@@ -305,7 +338,7 @@ int main() {
 		moved += zero;
 		coeffs_t u2 = coeffs(moved.c0, true), w2 = coeffs(moved.c1, true);
 		check("the decryption proof does not verify for another ciphertext",
-				!verdec::verify(dp, u2.data(), w2.data(), m.data()));
+				!verdec::verify(rp, u2.data(), w2.data(), m.data()));
 	}
 	{
 		bool eq;
@@ -322,6 +355,7 @@ int main() {
 		check("a shortness proof with a long noise row is rejected",
 				eq && !accepted);
 	}
+	if (rp != dp) verdec::release(rp);
 	verdec::release(dp);
 
 	cout << "\n    tally:";
@@ -331,7 +365,9 @@ int main() {
 		<< t_cast << " s, " << 1000 * t_cast / NV << " ms per ballot; board check "
 		<< t_check << " s, " << 1000 * t_check / NV << " ms per ballot\n";
 	cout << "    timing: decryption " << 1000 * t_decrypt << " ms; its proof "
-		<< t_dprove << " s to prove, " << t_dverify << " s to verify\n\n";
+		<< t_dprove << " s to prove, " << t_dverify << " s to verify\n";
+	cout << "    sizes: ballot proof (ciphertext included) " << proof_bytes() / 1024.0
+		<< " KiB; decryption proof " << dbytes.size() / 1024.0 << " KiB\n\n";
 	cout << (failures ? "FAILED: " : "All checks passed: ") << checks - failures
 		<< " of " << checks << "\n";
 	return failures != 0;

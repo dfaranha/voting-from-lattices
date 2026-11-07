@@ -44,6 +44,13 @@ make CONFIG="-DNV=4 -DNC=8 -DLC=4 -DLS=8" election
 ./election
 ```
 
+Both proofs go through bytes: the board decodes each ballot proof, ciphertext
+included (`proof_encode` and `proof_decode` in `src/vericrypt.cpp`: uniform
+elements at 62 bits a coefficient, the responses at 33, 2750 KiB in all), and
+the decryption proof is checked as read back from its encoding (`encode` and
+`decode` in `src/verdec_bridge.cpp`: uniform elements at 62 bits, the Gaussian
+responses Golomb-Rice coded, about 16 MiB). The program prints both sizes.
+
 The ballot proof shows every coefficient of the vote in [0, `LC`] and a
 weighted sum of them equal to `LS`: weight 1 on the `NC` candidates'
 coefficients and `LS + 1` on the rest. The sum is far below q, so it holds over

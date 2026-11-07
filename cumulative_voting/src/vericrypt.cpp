@@ -794,4 +794,111 @@ bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey,
 	return true;
 }
 
+/* ---------------------------------------------------------------------------
+ * The proof as bytes (vericrypt.hpp). */
 
+namespace {
+
+const int Q_BITS = 62;			/* q < 2^62 */
+const int Z_BITS = 33;			/* 2 (delta_1 - beta_1) - 1 values */
+const uint64_t Z_MAX = (uint64_t) delta_1 - beta_1 - 1;
+
+struct bits_t {
+	uint8_t *buf;
+	size_t len, at;
+	bool bad;
+	void put(uint64_t v, int n) {
+		for (int i = 0; i < n; i++, at++)
+			if ((v >> i) & 1) buf[at / 8] |= (uint8_t) (1u << (at % 8));
+	}
+	uint64_t get(int n) {
+		uint64_t v = 0;
+		if ((at + n + 7) / 8 > len) { bad = true; return 0; }
+		for (int i = 0; i < n; i++, at++)
+			v |= (uint64_t) ((buf[at / 8] >> (at % 8)) & 1) << i;
+		return v;
+	}
+};
+
+void put_uniform(bits_t &w, const P &a, size_t from = 0) {
+	for (size_t i = from; i < P::degree; i++) w.put(a.data()[i], Q_BITS);
+}
+
+void get_uniform(bits_t &r, P &a, size_t from = 0) {
+	for (size_t i = 0; i < from; i++) a.data()[i] = 0;
+	for (size_t i = from; i < P::degree; i++) {
+		uint64_t v = r.get(Q_BITS);
+		if (v >= P::get_modulus(0)) { r.bad = true; v = 0; }
+		a.data()[i] = v;
+	}
+}
+
+bool put_short(bits_t &w, const P &a) {
+	const uint64_t q = P::get_modulus(0);
+	bool ok = true;
+	for (size_t i = 0; i < P::degree; i++) {
+		uint64_t v = a.data()[i];
+		/* centred: v in [0, Z_MAX] or q - v in [1, Z_MAX] */
+		if (v <= Z_MAX) w.put(v + Z_MAX, Z_BITS);
+		else if (q - v <= Z_MAX) w.put(Z_MAX - (q - v), Z_BITS);
+		else { ok = false; w.put(0, Z_BITS); }
+	}
+	return ok;
+}
+
+void get_short(bits_t &r, P &a) {
+	const uint64_t q = P::get_modulus(0);
+	for (size_t i = 0; i < P::degree; i++) {
+		uint64_t u = r.get(Z_BITS);
+		if (u > 2 * Z_MAX) { r.bad = true; u = Z_MAX; }
+		a.data()[i] = (u >= Z_MAX) ? u - Z_MAX : q - (Z_MAX - u);
+	}
+}
+
+}
+
+size_t proof_bytes() {
+	size_t bits = (parameters::MU + kappa + 2) * P::degree * Q_BITS
+		+ (size_t) k * (parameters::MU + kappa + parameters::LAMBDA) * P::degree * Z_BITS
+		+ (P::degree - k) * Q_BITS + 8 * SYMBYTES;
+	return (bits + 7) / 8;
+}
+
+bool proof_encode(uint8_t *out, const proof_t &p) {
+	bits_t w{out, proof_bytes(), 0, false};
+	bool ok = true;
+	memset(out, 0, w.len);
+	for (auto &e : p.t.t0) put_uniform(w, e);
+	for (auto &e : p.t.t) put_uniform(w, e);
+	put_uniform(w, p.ct.c0);
+	put_uniform(w, p.ct.c1);
+	for (int i = 0; i < k; i++) {
+		for (auto &e : p.z[i].rs) ok &= put_short(w, e);
+		for (auto &e : p.z[i].re) ok &= put_short(w, e);
+		for (auto &e : p.z[i].rem) ok &= put_short(w, e);
+	}
+	put_uniform(w, p.h, k);
+	for (int i = 0; i < SYMBYTES; i++) w.put(p.chash[i], 8);
+	return ok;
+}
+
+bool proof_decode(proof_t &p, const uint8_t *in, size_t len) {
+	bits_t r{(uint8_t *) in, len, 0, false};
+	if (len != proof_bytes()) return false;
+	for (auto &e : p.t.t0) get_uniform(r, e);
+	for (auto &e : p.t.t) get_uniform(r, e);
+	get_uniform(r, p.ct.c0);
+	get_uniform(r, p.ct.c1);
+	p.ct.pk = nullptr;
+	p.ct.isnull = false;
+	for (int i = 0; i < k; i++) {
+		for (auto &e : p.z[i].rs) get_short(r, e);
+		for (auto &e : p.z[i].re) get_short(r, e);
+		for (auto &e : p.z[i].rem) get_short(r, e);
+	}
+	get_uniform(r, p.h, k);
+	for (int i = 0; i < SYMBYTES; i++) p.chash[i] = (uint8_t) r.get(8);
+	/* The padding bits of the last byte are zero. */
+	if (!r.bad && r.at % 8 != 0 && (in[r.at / 8] >> (r.at % 8)) != 0) r.bad = true;
+	return !r.bad;
+}

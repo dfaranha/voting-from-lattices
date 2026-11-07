@@ -53,4 +53,16 @@ void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P
 bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey,
 		const uint8_t *ctx, size_t ctxlen);
 
+/* A ballot proof as published bytes, always proof_bytes() long: t and ct,
+ * uniform residues in NTT form, at 62 bits a coefficient; z, coefficients
+ * with |z| < delta_1 - beta_1 (what verify accepts), at 33; h, whose first k
+ * coefficients are zero, at 62 for the rest; then chash. proof_encode returns
+ * false, writing a buffer nobody should read, for a z outside that range,
+ * which no proof the verifier accepts has. proof_decode returns true only
+ * for exactly such an encoding, and leaves p in the representation the
+ * prover had, which is what the Fiat-Shamir hashes absorb. */
+size_t proof_bytes();
+bool proof_encode(uint8_t *out, const proof_t &p);
+bool proof_decode(proof_t &p, const uint8_t *in, size_t len);
+
 #endif /* INCLUDE_VERICRYPT_HPP_ */
