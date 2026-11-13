@@ -11,8 +11,6 @@ public:
     z1.SetLength(3); z2.SetLength(3);
 }};
 
-void SampleChallenge(ZZ_pE &);
-
 void ProveLinearRelation(LinProof &, const ComKey &,const Commitment &,
   const Commitment &, const ZZ_pE &, const ZZ_pE &);
 

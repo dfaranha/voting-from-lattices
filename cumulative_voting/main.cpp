@@ -1,3 +1,4 @@
+#include <array>
 #include <iostream>
 #include <string>
 #include <memory>
@@ -38,7 +39,6 @@ void random_ballot(P& out, array<V, NC> ballot){
 }
 
 int main(){
-	constexpr size_t vecsize = P::simd_mode::template elt_count<P::value_type>::value;
 	cout << "Number of voters:        " << NV << endl;
 	cout << "Number of candiates:     " << NC << endl;
 	cout << "Max vote per candidate:  " << LC << endl;
@@ -70,13 +70,14 @@ int main(){
 
 		proof_t proof;
 		auto start = chrono::steady_clock::now();
-		vericrypt(proof, public_key, commkey, m);
+		string ctx = "vericrypt demo, voter " + to_string(i);
+		vericrypt(proof, public_key, commkey, m, (const uint8_t *) ctx.data(), ctx.size());
 		auto end = chrono::steady_clock::now();
 		auto duration_voter = chrono::duration_cast<chrono::milliseconds>(end-start).count();
 		// cout << "verifiable encryption time: " << duration_voter << "(ms)" << endl;
 
 		start = chrono::steady_clock::now();
-		bool res = verify(proof, commkey, public_key);
+		bool res = verify(proof, commkey, public_key, (const uint8_t *) ctx.data(), ctx.size());
 		end = chrono::steady_clock::now();
 		auto duration_verifier = chrono::duration_cast<chrono::milliseconds>(end-start).count();
 

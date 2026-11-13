@@ -1,15 +1,17 @@
 
 #include "linearityproof.h"
-#include <algorithm>
+#include "fiatshamir.h"
 
-void SampleChallenge(ZZ_pE &c){
-  vector<int> list(N); iota(list.begin(), list.end(), 0);
-  random_shuffle(list.begin(), list.end());
-  ZZ_pX f = ZZ_pX(INIT_MONO, N-1);
-  for(int i = 0; i < 36; i++){
-    long r = RandomBnd(2);
-    SetCoeff(f,list[i],r + (r-1)*1);
-  } c = to_ZZ_pE(f);}
+/* The challenge of one linear relation, from its statement (the commitment
+ * key, the two commitments, alpha and beta) and the prover's first messages
+ * t1, t2 and u. */
+static void Challenge(ZZ_pE &c, const ComKey &comKey, const Vec<ZZ_pE> &X1,
+  const Vec<ZZ_pE> &X2, const ZZ_pE &alpha, const ZZ_pE &beta,
+  const ZZ_pE &t1, const ZZ_pE &t2, const ZZ_pE &u){
+  Transcript t("verifiable-decryption-BGV linear relation");
+  t.Absorb(comKey.B1); t.Absorb(comKey.B2); t.Absorb(X1); t.Absorb(X2);
+  t.Absorb(alpha); t.Absorb(beta); t.Absorb(t1); t.Absorb(t2); t.Absorb(u);
+  LinearChallenge(c, t);}
 
 void ProveLinearRelation(LinProof &proof, const ComKey &comKey, const
   Commitment &X1, const Commitment &X2, const ZZ_pE &alpha, const ZZ_pE &beta){
@@ -21,7 +23,9 @@ void ProveLinearRelation(LinProof &proof, const ComKey &comKey, const
       proof.t1 = y1[0] + (y1[1]*comKey.B1[1]) + (y1[2]*comKey.B1[2]);
       proof.t2 = y2[0] + (y2[1]*comKey.B1[1]) + (y2[2]*comKey.B1[2]);
       proof.u = alpha * (y1[1] + y1[2]*comKey.B2[2]) -
-        (y2[1] + y2[2]*comKey.B2[2]); SampleChallenge(proof.c);
+        (y2[1] + y2[2]*comKey.B2[2]);
+      Challenge(proof.c, comKey, X1.com, X2.com, alpha, beta, proof.t1,
+        proof.t2, proof.u);
     for(int j = 0; j < 3; j++){
       cr1[j] = proof.c * X1.r[j]; cr2[j] = proof.c * X2.r[j];
       proof.z1[j] = y1[j] + cr1[j]; proof.z2[j] = y2[j] + cr2[j];}
@@ -41,6 +45,9 @@ void ProveLinearRelations(Vec<LinProof> &linProof, const Vec<Commitment>
 void VerifyLinearRelation(bool &b, const LinProof &proof, const ComKey &comKey,
   const Vec<ZZ_pE> &X1, const Vec<ZZ_pE> &X2, const ZZ_pE &alpha, const ZZ_pE
   &beta){b = true;
+  ZZ_pE c;
+  Challenge(c, comKey, X1, X2, alpha, beta, proof.t1, proof.t2, proof.u);
+  if (c != proof.c){b = false;}
   if (!CheckNorm(proof.z1,Bound_C) || !CheckNorm(proof.z2,Bound_C)){b = false;}
   if ((proof.z1[0] + proof.z1[1]*comKey.B1[1] + proof.z1[2]*comKey.B1[2])
   != (proof.t1 + proof.c*X1[0])){b = false;}

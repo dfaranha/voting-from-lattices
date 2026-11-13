@@ -29,7 +29,52 @@ T* alloc_aligned(size_t n, Args&& ... args)
 
 using V = typename P::value_type;
 
-void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P &message){
+/* The statement the Fiat-Shamir challenges are bound to: the caller's context
+ * (election and voter), the BGV public key, the commitment key and the
+ * ciphertext. The first hash of the prover and of the verifier absorbs it
+ * before anything else, so every later challenge depends on it: a proof does
+ * not carry over to another voter, election, key or ciphertext, and the
+ * statement cannot be chosen after the challenges. */
+static void statement_digest(uint8_t out[SYMBYTES], const uint8_t *ctx, size_t ctxlen,
+		const pk_t &pubkey, const comm_key_t &commkey, const ctx_t &ct){
+	static const char label[] = "cumulative_voting vericrypt v1";
+	uint8_t len[8];
+	for(int i=0;i<8;i++) len[i] = (uint8_t)((uint64_t)ctxlen >> (8*i));
+	shake128incctx st;
+	shake128_inc_init(&st);
+	shake128_inc_absorb(&st, (const uint8_t *)label, sizeof(label));
+	shake128_inc_absorb(&st, len, sizeof(len));
+	shake128_inc_absorb(&st, ctx, ctxlen);
+	shake128_inc_absorb(&st, (const uint8_t *)pubkey.a.data(), sizeof(P));
+	shake128_inc_absorb(&st, (const uint8_t *)pubkey.b.data(), sizeof(P));
+	for(auto &row : commkey.B0l) for(auto &e : row) shake128_inc_absorb(&st, (const uint8_t *)e.data(), sizeof(P));
+	for(auto &row : commkey.B0k) for(auto &e : row) shake128_inc_absorb(&st, (const uint8_t *)e.data(), sizeof(P));
+	for(auto &row : commkey.b) for(auto &e : row) shake128_inc_absorb(&st, (const uint8_t *)e.data(), sizeof(P));
+	shake128_inc_absorb(&st, (const uint8_t *)ct.c0.data(), sizeof(P));
+	shake128_inc_absorb(&st, (const uint8_t *)ct.c1.data(), sizeof(P));
+	shake128_inc_finalize(&st);
+	shake128_inc_squeeze(out, SYMBYTES, &st);
+	shake128_inc_ctx_release(&st);
+}
+
+/* The ballot's sum, sum_i w_i m_i = LS, with w_i = 1 for the NC candidates'
+ * coefficients and LS + 1 for the rest. The range proof makes every m_i an
+ * integer in [0, LC], and sum_i w_i m_i <= (NC + (LS + 1)(N - NC)) LC is far
+ * below q, so the equation holds over the integers: the votes add up to LS,
+ * and a vote in any coefficient past the candidates would alone exceed it.
+ * The proof's linear part takes the sum as gamma3 times the weights added to
+ * pi_3, the coefficient vector of m. */
+static void add_sum_weights(P &pi, V gamma3){
+	const V q = P::get_modulus(0);
+	const V heavy = (V)((unsigned __int128)gamma3 * (LS + 1) % q);
+	for(size_t i=0; i < P::degree; i++){
+		V w = (i < (size_t) NC) ? gamma3 : heavy;
+		pi.data()[i] = (V)(((unsigned __int128)pi.data()[i] + w) % q);
+	}
+}
+
+void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P &message,
+		const uint8_t *ctx, size_t ctxlen){
 
 	uint8_t symbuf[4*SYMBYTES];
 	memset(symbuf, 0, 4*SYMBYTES);
@@ -90,7 +135,10 @@ void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P
 
 	BDLOP::commit_poly(p.t, g, shat.size(), true);
 
+	uint8_t sdigest[SYMBYTES];
+	statement_digest(sdigest, ctx, ctxlen, pubkey, commkey, p.ct);
 	shake128_inc_init(&state);
+	shake128_inc_absorb(&state, sdigest, SYMBYTES);
 	shake128_inc_absorb(&state, (uint8_t *)p.t.t0.begin(), parameters::MU*sizeof(P));
 	shake128_inc_absorb(&state, (uint8_t *)p.t.t.begin(),  (shat.size() + 1)*sizeof(P));
 	shake128_inc_finalize(&state);
@@ -302,9 +350,7 @@ void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P
 			gammas[3*_mu].invntt_pow_invphi();
 			gammas[3*_mu+1].invntt_pow_invphi();
 			gammas[3*_mu+2].invntt_pow_invphi();
-			for(int i=0; i < P::degree; i++){
-				pis[3].data()[i] += gammas[3*_mu + 2].data()[0];
-			}
+			add_sum_weights(pis[3], gammas[3*_mu + 2].data()[0]);
 			mpz_set_ui(gamma3_mpz, gammas[3*_mu + 2].data()[0]);
 
 			utils::poly_inner_product_Zq(ug, p.ct.c0, gammas[3*_mu]);
@@ -415,7 +461,8 @@ void vericrypt(proof_t &p, const pk_t &pubkey,const comm_key_t& commkey, const P
 
 }
 
-bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey){
+bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey,
+		const uint8_t *ctx, size_t ctxlen){
 
 
 	bool  flag = true;
@@ -454,7 +501,10 @@ bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey){
 
 	shake128incctx state;
 
+	uint8_t sdigest[SYMBYTES];
+	statement_digest(sdigest, ctx, ctxlen, pubkey, commkey, p.ct);
 	shake128_inc_init(&state);
+	shake128_inc_absorb(&state, sdigest, SYMBYTES);
 	shake128_inc_absorb(&state, (uint8_t *)p.t.t0.data(), parameters::MU*sizeof(P));
 	shake128_inc_absorb(&state, (uint8_t *)p.t.t.data(),  (4+LC+1)*sizeof(P));
 	shake128_inc_finalize(&state);
@@ -652,9 +702,7 @@ bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey){
 		gammas[3*_mu].invntt_pow_invphi();
 		gammas[3*_mu+1].invntt_pow_invphi();
 		gammas[3*_mu+2].invntt_pow_invphi();
-		for(int i=0; i < P::degree; i++){
-			pis[3].data()[i] += gammas[3*_mu + 2].data()[0];
-		}
+		add_sum_weights(pis[3], gammas[3*_mu + 2].data()[0]);
 		mpz_set_ui(gamma3_mpz, gammas[3*_mu + 2].data()[0]);
 
 		utils::poly_inner_product_Zq(ug, p.ct.c0, gammas[3*_mu]);
@@ -746,4 +794,111 @@ bool verify(proof_t &p, const comm_key_t &commkey, const pk_t &pubkey){
 	return true;
 }
 
+/* ---------------------------------------------------------------------------
+ * The proof as bytes (vericrypt.hpp). */
 
+namespace {
+
+const int Q_BITS = 62;			/* q < 2^62 */
+const int Z_BITS = 33;			/* 2 (delta_1 - beta_1) - 1 values */
+const uint64_t Z_MAX = (uint64_t) delta_1 - beta_1 - 1;
+
+struct bits_t {
+	uint8_t *buf;
+	size_t len, at;
+	bool bad;
+	void put(uint64_t v, int n) {
+		for (int i = 0; i < n; i++, at++)
+			if ((v >> i) & 1) buf[at / 8] |= (uint8_t) (1u << (at % 8));
+	}
+	uint64_t get(int n) {
+		uint64_t v = 0;
+		if ((at + n + 7) / 8 > len) { bad = true; return 0; }
+		for (int i = 0; i < n; i++, at++)
+			v |= (uint64_t) ((buf[at / 8] >> (at % 8)) & 1) << i;
+		return v;
+	}
+};
+
+void put_uniform(bits_t &w, const P &a, size_t from = 0) {
+	for (size_t i = from; i < P::degree; i++) w.put(a.data()[i], Q_BITS);
+}
+
+void get_uniform(bits_t &r, P &a, size_t from = 0) {
+	for (size_t i = 0; i < from; i++) a.data()[i] = 0;
+	for (size_t i = from; i < P::degree; i++) {
+		uint64_t v = r.get(Q_BITS);
+		if (v >= P::get_modulus(0)) { r.bad = true; v = 0; }
+		a.data()[i] = v;
+	}
+}
+
+bool put_short(bits_t &w, const P &a) {
+	const uint64_t q = P::get_modulus(0);
+	bool ok = true;
+	for (size_t i = 0; i < P::degree; i++) {
+		uint64_t v = a.data()[i];
+		/* centred: v in [0, Z_MAX] or q - v in [1, Z_MAX] */
+		if (v <= Z_MAX) w.put(v + Z_MAX, Z_BITS);
+		else if (q - v <= Z_MAX) w.put(Z_MAX - (q - v), Z_BITS);
+		else { ok = false; w.put(0, Z_BITS); }
+	}
+	return ok;
+}
+
+void get_short(bits_t &r, P &a) {
+	const uint64_t q = P::get_modulus(0);
+	for (size_t i = 0; i < P::degree; i++) {
+		uint64_t u = r.get(Z_BITS);
+		if (u > 2 * Z_MAX) { r.bad = true; u = Z_MAX; }
+		a.data()[i] = (u >= Z_MAX) ? u - Z_MAX : q - (Z_MAX - u);
+	}
+}
+
+}
+
+size_t proof_bytes() {
+	size_t bits = (parameters::MU + kappa + 2) * P::degree * Q_BITS
+		+ (size_t) k * (parameters::MU + kappa + parameters::LAMBDA) * P::degree * Z_BITS
+		+ (P::degree - k) * Q_BITS + 8 * SYMBYTES;
+	return (bits + 7) / 8;
+}
+
+bool proof_encode(uint8_t *out, const proof_t &p) {
+	bits_t w{out, proof_bytes(), 0, false};
+	bool ok = true;
+	memset(out, 0, w.len);
+	for (auto &e : p.t.t0) put_uniform(w, e);
+	for (auto &e : p.t.t) put_uniform(w, e);
+	put_uniform(w, p.ct.c0);
+	put_uniform(w, p.ct.c1);
+	for (int i = 0; i < k; i++) {
+		for (auto &e : p.z[i].rs) ok &= put_short(w, e);
+		for (auto &e : p.z[i].re) ok &= put_short(w, e);
+		for (auto &e : p.z[i].rem) ok &= put_short(w, e);
+	}
+	put_uniform(w, p.h, k);
+	for (int i = 0; i < SYMBYTES; i++) w.put(p.chash[i], 8);
+	return ok;
+}
+
+bool proof_decode(proof_t &p, const uint8_t *in, size_t len) {
+	bits_t r{(uint8_t *) in, len, 0, false};
+	if (len != proof_bytes()) return false;
+	for (auto &e : p.t.t0) get_uniform(r, e);
+	for (auto &e : p.t.t) get_uniform(r, e);
+	get_uniform(r, p.ct.c0);
+	get_uniform(r, p.ct.c1);
+	p.ct.pk = nullptr;
+	p.ct.isnull = false;
+	for (int i = 0; i < k; i++) {
+		for (auto &e : p.z[i].rs) get_short(r, e);
+		for (auto &e : p.z[i].re) get_short(r, e);
+		for (auto &e : p.z[i].rem) get_short(r, e);
+	}
+	get_uniform(r, p.h, k);
+	for (int i = 0; i < SYMBYTES; i++) p.chash[i] = (uint8_t) r.get(8);
+	/* The padding bits of the last byte are zero. */
+	if (!r.bad && r.at % 8 != 0 && (in[r.at / 8] >> (r.at % 8)) != 0) r.bad = true;
+	return !r.bad;
+}

@@ -50,3 +50,8 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Build outputs of cumulative_voting
+cumulative_voting/obj/
+cumulative_voting/vericrypt
+cumulative_voting/election
